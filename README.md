@@ -37,27 +37,18 @@ The book is identified by the title Kobo shows, because `setVolume` isn't called
 | `debug` | `true` | detailed `nickelbookends.log` |
 | `override_total` | `0` | force a page count (testing) |
 
-## Build and install
-
-```sh
-sh build.sh      # Docker + NickelTC -> KoboRoot.tgz
-```
-
-Copy `KoboRoot.tgz` into `KOBOeReader/.kobo/` and eject. The tgz also installs the NickelMenu entries (`.adds/nm/nickelbookends`).
-
-**Uninstall:** delete `.adds/nickelbookends/uninstall`, then reboot. If NickelPages is still installed, NickelBookends asks it to uninstall itself at the next reboot.
-
-**Tests:** run `./test/run.sh` (needs Qt5 dev packages). It also checks that no source file has C++ static initializers.
+## Installation
+ 
+1. Download **`KoboRoot.tgz`** from the [**Releases**](../../releases/latest) page.
+2. Connect your Kobo to your computer.
+3. Copy `KoboRoot.tgz` into the hidden **`.kobo`** folder on the Kobo.
+   - On a Mac, press **Cmd + Shift + .** in Finder to show hidden folders.
+   - On Windows, enable *Hidden items* in File Explorer's **View** menu.
+4. **Eject** the Kobo. It installs the mod and restarts by itself.
+> **Tip:** close any open book before installing, so the Kobo restarts to the home screen.
 
 ## How it talks to NickelMenu
 
 "Physical book progress" touches `/tmp/nickelbookends_progress`. That's in RAM, not on the SD card. NickelBookends checks for that file for about 1.5 s after a tap and then shows the toast with Kobo's own `MainWindowController::toast`, the same one NickelDBus uses. "Hide book titles" edits `settings.ini`, and NickelBookends picks up the change at the next page turn or tap.
-
-## History / lessons
-
-- **v1–v2 crashed Nickel at boot.** NickelHook runs the mod's init from an ELF constructor, before C++ global objects exist. All state now lives in a struct created in init.
-- **v3–v4 used the wrong book;** v5+ uses the title Kobo shows.
-- **v7–v8 conflicted with NickelPages** when both were installed.
-- **v9 briefly showed the previous page again on page turns with "Hide book titles" on.** Changing the caption's text mid-turn made the footer re-layout, and Kobo redrew its stale page. v10 never changes Kobo's text: it paints the shortened caption itself in the label's own paint event, with the label's font, colour and alignment. Nothing is resized or re-laid out.
 
 Credits: NickelHook and NickelMenu (MIT); the hooks follow NickelClock, NickelHardcover, NickelDissolve and NickelDBus.
