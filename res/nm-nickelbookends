@@ -1,11 +1,10 @@
-# NickelBookends items in the reading menu (the ⋯ menu in the top toolbar while reading).
-menu_item :reader :Physical book progress :cmd_spawn :quiet:touch /tmp/nickelbookends_progress
-menu_item :reader :Physical book pages in footer :cmd_output :500:quiet:grep -q '^physical_pages=true' /mnt/onboard/.adds/nickelbookends/settings.ini
+# NickelBookends toggles in the reading menu (the ⋯ menu in the top toolbar while reading).
+menu_item :reader :Physical book pages :cmd_output :500:quiet:grep -q '^physical_pages=true' /mnt/onboard/.adds/nickelbookends/settings.ini
   chain_success :cmd_spawn :quiet:sed -i 's/^physical_pages=.*/physical_pages=false/' /mnt/onboard/.adds/nickelbookends/settings.ini
-  chain_success :dbg_toast :Physical book pages in footer - off
+  chain_success :dbg_toast :Physical book pages - off
   chain_success :skip :-1
   chain_failure :cmd_spawn :quiet:grep -q '^physical_pages=' /mnt/onboard/.adds/nickelbookends/settings.ini && sed -i 's/^physical_pages=.*/physical_pages=true/' /mnt/onboard/.adds/nickelbookends/settings.ini || echo 'physical_pages=true' >> /mnt/onboard/.adds/nickelbookends/settings.ini
-  chain_success :dbg_toast :Physical book pages in footer - on
+  chain_success :dbg_toast :Physical book pages - on
 menu_item :reader :Hide book titles :cmd_output :500:quiet:grep -q '^hide_title=true' /mnt/onboard/.adds/nickelbookends/settings.ini
   chain_success :cmd_spawn :quiet:sed -i 's/^hide_title=.*/hide_title=false/' /mnt/onboard/.adds/nickelbookends/settings.ini
   chain_success :dbg_toast :Hide book titles - off

@@ -1,10 +1,9 @@
-// NickelBookends - two items in the reading menu (NickelMenu):
+// NickelBookends - two toggles in the reading menu (NickelMenu):
 //
-//   * Hide book titles (toggle): removes the book title from the reading
-//     header and footer ("The Jasad Crown • 45% READ" -> "45% READ").
-//   * Physical book progress: shows a toast "Page 302 of 671" - your position
-//     in the printed edition, using "Pages" from Book details (StorePages).
-//     Nothing is added to the header, footer or toolbar.
+//   * Physical book pages: where Kobo shows the reading percentage, also show
+//     the page of the printed edition ("Pages" in Book details = StorePages):
+//         The Jasad Crown • 302 OF 671 • 45% READ
+//   * Hide book titles: hides the book title in the reading header and footer.
 //
 // Position, most precise first: the toolbar's "Page X of Y" if it is open
 // (read only), else Kobo's percentage refined by counted page turns (1% is
@@ -25,6 +24,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QLabel>
+#include <QMouseEvent>
+#include <QTouchEvent>
 #include <QPainter>
 #include <QStyle>
 #include <QStyleOption>
@@ -53,8 +54,7 @@
 #define NB_SETTINGS   NB_CONFIG_DIR "/settings.ini"
 #define NB_CACHE      NB_CONFIG_DIR "/learned.ini"
 #define NB_LOG_PATH   NB_CONFIG_DIR "/nickelbookends.log"
-#define NB_VERSION    "v11"
-#define NB_TRIGGER    "/tmp/nickelbookends_progress" // touched by the NickelMenu item (tmpfs)
+#define NB_VERSION    "v12"
 
 typedef QWidget ReadingView;
 typedef void ReadingController;
@@ -67,9 +67,6 @@ static void    (*ReadingView__goToNextPage)(ReadingView *_this);
 static void    (*ReadingView__goToPrevPage)(ReadingView *_this);
 static QString (*Content__getId)(Volume *_this);
 static int     (*ReadingView__getCalculatedReadProgress)(QWidget *_this);
-typedef QObject MainWindowController;
-static MainWindowController *(*MainWindowController__sharedInstance)();
-static void    (*MainWindowController__toast)(MainWindowController *_this, QString const &main, QString const &sub, int ms);
 
 static const char nb_prop_hooked[] = "NickelBookendsHooked";
 
@@ -79,8 +76,7 @@ struct NBState {
     bool      hide_title = false;
     bool      physical_pages = true;   // "Physical book pages in footer"
     QString   page_format;
-    QString   toast_format;
-    bool      debug = true;
+    bool      debug = false;
     int       override_total = 0;
     qint64    settings_mtime = -1;
     // book
@@ -100,8 +96,7 @@ struct NBState {
     // ui
     QPointer<QWidget> reading_view;
     QTimer   *timer = nullptr;
-    QTimer   *trigger_timer = nullptr;
-    int       trigger_checks = 0;
+    bool      look_for_toolbar = false; // set by a tap in the middle of the screen
     // watchdog
     bool      tripped = false;
     qint64    window_start = 0;
@@ -138,8 +133,7 @@ static void nb_load_settings()
     nb->hide_title     = s.value("hide_title", false).toBool();
     nb->physical_pages = s.value("physical_pages", true).toBool();
     nb->page_format    = s.value("page_format", "{page} OF {total}").toString();
-    nb->toast_format   = s.value("toast_format", "Page {page} of {total}").toString();
-    nb->debug          = s.value("debug", true).toBool();
+    nb->debug          = s.value("debug", false).toBool();
     nb->override_total = s.value("override_total", 0).toInt();
     nb->settings_mtime = QFileInfo(NB_SETTINGS).lastModified().toMSecsSinceEpoch();
 }
@@ -483,56 +477,6 @@ static double nb_toolbar_fraction()
     return -1;
 }
 
-static void nb_show_progress()
-{
-    if (!MainWindowController__sharedInstance || !MainWindowController__toast) {
-        nb_log("! toast function not found on this firmware");
-        return;
-    }
-    QString msg, sub;
-    int total = nb_total_pages();
-    if (total <= 0) {
-        msg = "No page count";
-        sub = "This book has no \"Pages\" value in Book details";
-    } else {
-        QString src = "toolbar";
-        double f = nb_toolbar_fraction();
-        if (f < 0) {
-            int pct = nb_current_pct();
-            if (pct >= 0) {
-                f = nb_fraction(pct);
-                src = nb->turns_per_pct > 0 ? "percent + counted turns" : "percent";
-            }
-        }
-        if (f < 0) {
-            msg = "Position unknown";
-            sub = "Turn a page and try again";
-        } else {
-            int page = np_page_for_fraction(f, total);
-            msg = np_format(nb->toast_format, page, total, f, QString());
-            nb_log(QString("progress toast: '%1' (from %2)").arg(msg, src));
-        }
-    }
-    MainWindowController__toast(MainWindowController__sharedInstance(), msg, sub, 3000);
-}
-
-// The NickelMenu item touches a file in /tmp (RAM, not the SD card); look for it
-// a few times right after a tap.
-static void nb_check_trigger()
-{
-    if (!nb)
-        return;
-    if (QFile::exists(NB_TRIGGER)) {
-        QFile::remove(NB_TRIGGER);
-        nb->trigger_checks = 0;
-        nb_settings_changed();
-        nb_show_progress();
-        return;
-    }
-    if (--nb->trigger_checks > 0)
-        nb->trigger_timer->start(400);
-}
-
 static void nb_update()
 {
     if (!nb || nb->tripped)
@@ -542,7 +486,10 @@ static void nb_update()
     if (!rv || !rv->isVisible())
         return;
     nb_total_pages(); // DB lookup here, never inside a paint
-    nb_toolbar_fraction(); // if the toolbar is open: exact position + taps per 1%
+    if (nb->look_for_toolbar) {   // only after a tap in the middle (that's what opens the toolbar)
+        nb->look_for_toolbar = false;
+        nb_toolbar_fraction();    // if the toolbar is open: exact position + taps per 1%
+    }
     int pct = nb_current_pct();
     if (pct >= 0)
         nb_fraction(pct); // keeps the per-book "turns per 1%" learning up to date
@@ -570,9 +517,20 @@ protected:
         case QEvent::MouseButtonRelease:
         case QEvent::TouchEnd:
             if (nb && nb->reading_view) {
-                nb_schedule(600);
-                nb->trigger_checks = 4; // ~1.6 s of checks for the NickelMenu item
-                nb->trigger_timer->start(300);
+                // A tap in the middle third opens the toolbar: look at its
+                // "Page X of Y" shortly after (read only).
+                QWidget *rv = nb->reading_view.data();
+                QPoint pos;
+                if (ev->type() == QEvent::MouseButtonRelease)
+                    pos = static_cast<QMouseEvent*>(ev)->globalPos();
+                else if (!static_cast<QTouchEvent*>(ev)->touchPoints().isEmpty())
+                    pos = static_cast<QTouchEvent*>(ev)->touchPoints().first().screenPos().toPoint();
+                QRect r = rv->rect().translated(rv->mapToGlobal(QPoint(0, 0)));
+                QRect middle(r.left() + r.width() / 3, r.top() + r.height() / 3, r.width() / 3, r.height() / 3);
+                if (middle.contains(pos)) {
+                    nb->look_for_toolbar = true;
+                    nb_schedule(600);
+                }
             }
             break;
         default:
@@ -667,9 +625,6 @@ static int nb_init()
     nb->timer = new QTimer();
     nb->timer->setSingleShot(true);
     QObject::connect(nb->timer, &QTimer::timeout, &nb_update);
-    nb->trigger_timer = new QTimer();
-    nb->trigger_timer->setSingleShot(true);
-    QObject::connect(nb->trigger_timer, &QTimer::timeout, &nb_check_trigger);
     nb_load_settings();
     nb_log("NickelBookends " NB_VERSION " started");
     // NickelBookends replaces NickelPages; both rewriting the same captions
@@ -694,7 +649,7 @@ static bool nb_uninstall()
 
 static struct nh_info NickelBookendsInfo = {
     .name            = "NickelBookends",
-    .desc            = "Hide book titles; physical book progress toast",
+    .desc            = "Physical book pages and hide book titles in the reading header/footer",
     .uninstall_flag  = nullptr,
     .uninstall_xflag = NB_CONFIG_DIR "/uninstall",
     .failsafe_delay  = 10,
@@ -720,10 +675,6 @@ static struct nh_dlsym NickelBookendsDlsym[] = {
     { .name = "_ZNK7Content5getIdEv", .out = nh_symoutptr(Content__getId), .desc = "Content::getId()", .optional = true },
     { .name = "_ZN11ReadingView25getCalculatedReadProgressEv", .out = nh_symoutptr(ReadingView__getCalculatedReadProgress),
       .desc = "ReadingView::getCalculatedReadProgress()", .optional = true },
-    { .name = "_ZN20MainWindowController14sharedInstanceEv", .out = nh_symoutptr(MainWindowController__sharedInstance),
-      .desc = "MainWindowController::sharedInstance()", .optional = true },
-    { .name = "_ZN20MainWindowController5toastERK7QStringS2_i", .out = nh_symoutptr(MainWindowController__toast),
-      .desc = "MainWindowController::toast()", .optional = true },
     {0},
 };
 
