@@ -2,8 +2,7 @@
 
 A [NickelHook](https://github.com/pgaskin/NickelHook) mod for Kobo eReaders with three items in the reading menu (the **⋯** menu in the top toolbar while reading, via [NickelMenu](https://pgaskin.net/NickelMenu/)):
 
-- **Physical book progress.** A toast like **"Page 302 of 671"**.
-- **Physical book pages in footer** (toggle). `The Jasad Crown • 302 OF 671 • 45% READ`
+- **Physical book pages** (toggle). `The Jasad Crown • 302 OF 671 • 45% READ`
 - **Hide book titles** (toggle). `302 OF 671 • 45% READ`
 
 The page count is the "Pages" value from **Book details** (`content.StorePages`). Kobo's own caption text is never changed: NickelBookends draws its version in the caption's own paint event, so nothing is resized or re-laid out.
@@ -32,9 +31,8 @@ The book is identified by the title Kobo shows, because `setVolume` isn't called
 | `physical_pages` | `true` | toggled by "Physical book pages in footer" |
 | `hide_title` | `false` | toggled by "Hide book titles" |
 | `page_format` | `{page} OF {total}` | footer page text |
-| `toast_format` | `Page {page} of {total}` | Tokens: `{page}` `{total}` `{left}` `{percent}` |
 | `enabled` | `true` | master switch |
-| `debug` | `true` | detailed `nickelbookends.log` |
+| `debug` | `false` | detailed `nickelbookends.log` |
 | `override_total` | `0` | force a page count (testing) |
 
 ## Installation
@@ -49,6 +47,6 @@ The book is identified by the title Kobo shows, because `setVolume` isn't called
 
 ## How it talks to NickelMenu
 
-"Physical book progress" touches `/tmp/nickelbookends_progress`. That's in RAM, not on the SD card. NickelBookends checks for that file for about 1.5 s after a tap and then shows the toast with Kobo's own `MainWindowController::toast`, the same one NickelDBus uses. "Hide book titles" edits `settings.ini`, and NickelBookends picks up the change at the next page turn or tap.
+"Hide book titles" edits `settings.ini`, and NickelBookends picks up the change at the next page turn or tap.
 
 Credits: NickelHook and NickelMenu (MIT); the hooks follow NickelClock, NickelHardcover, NickelDissolve and NickelDBus.
